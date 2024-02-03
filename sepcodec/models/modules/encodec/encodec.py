@@ -10,7 +10,7 @@ from transformers import AutoFeatureExtractor, AutoModel, AutoProcessor
 
 class Encodec(nn.Module):
 
-    def __init__(self,  sample_rate=32000, frozen=True, model_bandwidth=3, *args, **kwargs) -> None:
+    def __init__(self,  sample_rate=32000, frozen=True, model_bandwidth=3, n_codebooks = 6, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.frozen = frozen
         self.sample_rate = sample_rate
@@ -33,11 +33,13 @@ class Encodec(nn.Module):
             self.card = 2048
             self.fps = 50
             
-            
+        self.n_codebooks = n_codebooks
         print(f"Model sample rate: {self.sample_rate}")
         print(f"Model hop length: {self.hop_length}")
         # dummy test
-        print( "Dummy test: ", self.dummy_test()[0].shape, self.dummy_test()[1].shape)
+        print( "Dummy test: ", self.dummy_test()[0].shape, self.dummy_test()[1].shape, self.dummy_test()[2].shape)
+        
+        
         
         
         if self.frozen:
@@ -50,36 +52,36 @@ class Encodec(nn.Module):
         if wav.dim() == 2:
             wav = wav.unsqueeze(0)
 
-        encoded_frames = self.model.encode(wav)
-        if self.sample_rate != 32000:
-            self.model.encoder(wav)
-            codes = torch.cat([encoded[0]
-                            for encoded in encoded_frames], dim=-1)  # [B, n_q, T]
-        else:
+        # encoded_frames = self.model.encode(wav)
+        # if self.sample_rate != 32000:
+        #     self.model.encoder(wav)
+        #     codes = torch.cat([encoded[0]
+        #                     for encoded in encoded_frames], dim=-1)  # [B, n_q, T]
+        # else:
             # codes = encoded_frames.audio_codes.squeeze(0)
-            embeddings = self.model.encoder(wav)
-            codes = self.model.quantizer.encode(embeddings).permute(1,0,2)
+        embeddings = self.model.encoder(wav)
+        codes = self.model.quantizer.encode(embeddings).int()
+        quantized_embeddings = self.model.quantizer.decode(codes)
+        embeddings = embeddings.permute(0, 2, 1)
+        quantized_embeddings = quantized_embeddings.permute(0, 2, 1)
             # codes = torch.zeros(1, 1, 1)
+        codes = codes[:, :self.n_codebooks, :]
+        
         
         return {
-            'codes':codes.int(),
-            'embeddings':embeddings
+            'codes':codes,
+            'embeddings':embeddings,
+            'quantized_embeddings': quantized_embeddings
         }
-    
-    def get_embeddings(self,wav):
-        if wav.dim() == 2:
-            wav = wav.unsqueeze(0)
-        
-        embeddings = self.model.encoder(wav)
-        return embeddings.permute(0,2,1)
 
     def get_encodec_output(self,wav):
         
         output = self(wav)
         codes = output['codes']
-        embeddings = output['embeddings'].permute(0,2,1)
+        embeddings = output['embeddings']
+        quantized_embeddings = output['quantized_embeddings']
         
-        return codes,embeddings
+        return codes,embeddings, quantized_embeddings
     
     
     
